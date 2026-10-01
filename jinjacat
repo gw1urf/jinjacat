@@ -1,0 +1,119 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#     "frontmatter",
+#     "jinja2",
+# ]
+# ///
+
+import argparse
+import os
+import re
+import subprocess
+import sys
+import typing
+
+import jinja2
+from frontmatter import Frontmatter
+
+def kwarg_type(arg):
+    m = re.match(r"^([a-zA-Z0-9_]+)=(.*)$", arg)
+    if not m:
+        raise argparse.ArgumentTypeError(f"Not a valid pair in {arg}")
+    return {m.group(1): m.group(2)}
+
+parser = argparse.ArgumentParser(
+    description="Display a file, expanding front matter and cli args"
+)
+parser.add_argument("-unsafe", action="store_true",
+    help="Use any embedded \"pipe=\" definition to postprocess"
+)
+parser.add_argument("file", type=str, metavar="file",
+    help="File with optional front matter and jinja tags"
+)
+parser.add_argument("kwargs", type=kwarg_type, nargs="*",
+    help="Optional arg=value pairs which will pass through as jinja2 variables"
+)
+
+args = parser.parse_args()
+
+# Cunning way of merging any kwargs into a single dict.
+args.kwargs = dict(map(dict.popitem, args.kwargs))
+
+try:
+    with open(args.file, "r") as f:
+        content = f.read()
+except Exception as e:
+    print(str(e), file=sys.stderr)
+    exit(1)
+
+# Try to read front matter.
+fm=Frontmatter.read(content)
+if fm["body"] != "":
+    # If fm contains a non-blank "body", then it's what was
+    # left after front matter was stripped off.
+    content = fm["body"]
+
+if fm["attributes"] is not None:
+    # If fm contains a non-empty "attributes" then merge it
+    # with any command line args, with cli taking precedence.
+    args.kwargs = fm["attributes"] | args.kwargs
+
+env = jinja2.Environment(loader=jinja2.BaseLoader)
+
+def render(template: str, max_recursion: int = 1, **kwargs) -> str:
+    """Repeatedly render a template until it doesn't change.
+
+    This is a bit of a hack, but it allows the front matter to,
+    itself, contain jinja fragments. Since the front matter is
+    YAML, it can contain complex structures. It seems easier to
+    allow iterative rendering than to try to handle all possible
+    structures.
+
+    max_depth specifies how many times we'll allow the
+    code to loop before we give up and raise an exception. The
+    default is 1, which will just do the initial render and
+    *won't* raise an exception.
+    """
+
+    # The first render.
+    rendered = env.from_string(template).render(**kwargs)
+
+    if max_iterations > 1:
+        for _ in range(max_iterations-1):
+            new_rendered = env.from_string(rendered).render(**kwargs)
+            if new_rendered == rendered:
+                break
+            rendered = new_rendered
+        else:
+            raise ValueError("Infinite recursion detected in output")
+
+    return rendered
+
+# Render the content. If "max_depth" is specified in kwargs then
+# it'll be used.
+rendered = render(content, **args.kwargs)
+
+# If the front matter (or cli args) contains a "pipe" key,
+# then use it as a shell command to postprocess our output.
+# We'll use render() again here and, if max_depth is present,
+# the "pipe" option can contain further tags.
+if args.unsafe and "pipe" in args.kwargs:
+    # Since we're allowing unsafe at this point, let's give it a 
+    # handle on stdout. This will allow the pipe to, for example,
+    # detect whether it's connected to a terminal.
+    if "stdout" not in args.kwargs:
+        args.kwargs["stdout"] = sys.stdout
+
+    pipe = render(args.kwargs["pipe"], **args.kwargs)
+    ret = subprocess.run(
+        [os.environ["SHELL"], "-c", pipe],
+        input=rendered.encode(),
+        check=False,
+    )
+    sys.exit(ret.returncode)
+else:
+    print(rendered)
+    sys.exit(0)
