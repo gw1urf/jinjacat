@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 #
 # /// script
-# requires-python = ">=3.14"
+# requires-python = ">=3.10"
 # dependencies = [
 #     "frontmatter",
 #     "jinja2",
@@ -10,15 +10,17 @@
 
 import argparse
 import os
+import pathlib
 import re
 import subprocess
 import sys
-import typing
 
 import jinja2
 from frontmatter import Frontmatter
 
-def kwarg_type(arg):
+
+def kwarg_type(arg: str) -> dict[str,str]:
+    """Parse an argument of the form key=value and return a dict."""
     m = re.match(r"^([a-zA-Z0-9_]+)=(.*)$", arg)
     if not m:
         raise argparse.ArgumentTypeError(f"Not a valid pair in {arg}")
@@ -28,7 +30,7 @@ parser = argparse.ArgumentParser(
     description="Display a file, expanding front matter and cli args"
 )
 parser.add_argument("-unsafe", action="store_true",
-    help="Use any embedded \"pipe=\" definition to postprocess"
+    help="""Use any embedded "pipe=" definition to postprocess"""
 )
 parser.add_argument("file", type=str, metavar="file",
     help="File with optional front matter and jinja tags"
@@ -43,11 +45,11 @@ args = parser.parse_args()
 args.kwargs = dict(map(dict.popitem, args.kwargs))
 
 try:
-    with open(args.file, "r") as f:
+    with pathlib.Path.open(args.file) as f:
         content = f.read()
 except Exception as e:
     print(str(e), file=sys.stderr)
-    exit(1)
+    sys.exit(1)
 
 # Try to read front matter.
 fm=Frontmatter.read(content)
@@ -63,7 +65,7 @@ if fm["attributes"] is not None:
 
 env = jinja2.Environment(loader=jinja2.BaseLoader)
 
-def render(template: str, max_recursion: int = 1, **kwargs) -> str:
+def render(template: str, max_depth: int = 1, **kwargs) -> str:
     """Repeatedly render a template until it doesn't change.
 
     This is a bit of a hack, but it allows the front matter to,
@@ -77,12 +79,11 @@ def render(template: str, max_recursion: int = 1, **kwargs) -> str:
     default is 1, which will just do the initial render and
     *won't* raise an exception.
     """
-
     # The first render.
     rendered = env.from_string(template).render(**kwargs)
 
-    if max_iterations > 1:
-        for _ in range(max_iterations-1):
+    if max_depth > 1:
+        for _ in range(max_depth-1):
             new_rendered = env.from_string(rendered).render(**kwargs)
             if new_rendered == rendered:
                 break
@@ -101,7 +102,7 @@ rendered = render(content, **args.kwargs)
 # We'll use render() again here and, if max_depth is present,
 # the "pipe" option can contain further tags.
 if args.unsafe and "pipe" in args.kwargs:
-    # Since we're allowing unsafe at this point, let's give it a 
+    # Since we're allowing unsafe at this point, let's give it a
     # handle on stdout. This will allow the pipe to, for example,
     # detect whether it's connected to a terminal.
     if "stdout" not in args.kwargs:
