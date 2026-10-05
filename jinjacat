@@ -93,10 +93,6 @@ def render(template: str, max_depth: int = 1, **kwargs) -> str:
 
     return rendered
 
-# Render the content. If "max_depth" is specified in kwargs then
-# it'll be used.
-rendered = render(content, **args.kwargs)
-
 # If the front matter (or cli args) contains a "pipe" key,
 # then use it as a shell command to postprocess our output.
 # We'll use render() again here and, if max_depth is present,
@@ -108,6 +104,10 @@ if args.unsafe and "pipe" in args.kwargs:
     if "stdout" not in args.kwargs:
         args.kwargs["stdout"] = sys.stdout
 
+    # Render the content. If "max_depth" is specified in kwargs then
+    # it'll be used.
+    rendered = render(content, **args.kwargs)
+
     pipe = render(args.kwargs["pipe"], **args.kwargs)
     ret = subprocess.run(
         [os.environ["SHELL"], "-c", pipe],
@@ -116,5 +116,12 @@ if args.unsafe and "pipe" in args.kwargs:
     )
     sys.exit(ret.returncode)
 else:
+    if "stdout" not in args.kwargs:
+        args.kwargs["stdout"] = None
+
+    # Render the content. If "max_depth" is specified in kwargs then
+    # it'll be used.
+    rendered = render(content, **args.kwargs)
+
     print(rendered)
     sys.exit(0)

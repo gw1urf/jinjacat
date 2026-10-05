@@ -1,0 +1,35 @@
+---
+# An example pipe command for "-unsafe" mode. We'll translate lower-case
+# to upper case and, if output is to a terminal, pass the result through
+# "more".
+pipe: "tr a-z A-Z {% if stdout and stdout.isatty() %} | more{% endif %}"
+
+# Some more definitions
+numbers:
+    - "ten"
+    - "nine"
+    - "eight"
+    - "seven"
+    - "six"
+    - "five"
+    - "four"
+    - "three"
+    - "two"
+    - "one"
+    - "no"
+
+# Items we could use in the song.
+items:
+    - [ "green bottle", "green bottles" ]
+    - [ "stick of dynamite", "sticks of dynamite" ]
+
+---
+{% set singular, plural = items | random %}
+{% for i in range(numbers | length - 1) %}
+{%- set last = loop.last -%}
+{%- for rep in range(2) %}
+{{numbers[i] | capitalize}} {{singular if last else plural}}, hanging on the wall.
+{%- endfor %}
+And if {% if loop.last %}that{% else %}one{% endif %} {{singular}} should accidentally fall,
+There'll be {{numbers[i+1]}} {{singular if i == numbers | length-3 else plural}} hanging on the wall.
+{% endfor %}
